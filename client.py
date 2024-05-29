@@ -1,6 +1,5 @@
 from gameObjects import *
-import message
-import json
+from test_all import message
 import socket
 import pygame
 import threading
@@ -23,15 +22,16 @@ class Client():
         self.bullet_pool = BulletPool(MAX_BULLET_NUM)
         self.tank = Tank(np.array([100.0, 100.0]), np.array([1.0, 0]), (255, 0, 0), 50, 200, 100, 500)
         self.tanks = [self.tank]
+        self.all_sprites = pygame.sprite.Group(self.tanks, self.bullet_pool)
         
     def connect(self):
         self.client_socket.connect((self.host_ip, self.host_port))
         self.connect_state = "connected"
+        print("connect success")
         
     def register(self):
         self.send(message.Msg("register", None).to_bytes())
         data = message.Msg.from_bytes(self.recv())
-        print(data)
         # example {'type': 'register', 'id': 0, 'color': (255, 0, 0)...}
         self.id = data.data['id']
         self.tank.color = data.data['color']
@@ -65,7 +65,8 @@ class Client():
                 for m in msg:
                     if(m != ''):
                         self.update(m)
-            
+        print("end")
+
     def update(self, server_msg):    
         data = message.Msg.from_bytes(server_msg)
         type = data.type
@@ -91,15 +92,20 @@ class Client():
                 self.bullet_pool = BulletPool.from_bytes(bullet_pool_data)
     
     def draw(self, screen, tanks, bullet_pool):
-        for tank in tanks:
-            tank.draw(screen)    
-        bullet_pool.draw(screen)   
+        self.all_sprites=pygame.sprite.Group(self.tanks, self.bullet_pool)
+        self.all_sprites.draw(screen)
+        # for tank in tanks:
+        #     tank.draw(screen)
          
     def game_loop(self, screen):
         loop_start_time = pygame.time.get_ticks()
         
         screen.fill((255, 255, 255))
-        self.tank.update(1 / fps)  
+        result=self.tank.update(1 / fps)
+        if (result=="Quit"):
+            self.quit()
+            return
+
         # with lock:
         #     self.bullet_pool.update(1 / fps)
         
@@ -123,11 +129,13 @@ class Client():
         
     def start(self):
         screen = pygame.display.set_mode((640, 480))
+
         thread_connect = threading.Thread(target=self.connect)
         thread_connect.start()
         while(self.connect_state != "connected"):
             time.sleep(0.1)
         self.register()
+        print("register success")
         
         thread_recv = threading.Thread(target=self.recv_and_update)
         thread_recv.start() 
@@ -139,7 +147,7 @@ class Client():
             self.game_loop(screen)                
                
     def quit(self):
-        self.client_socket.send(message.Msg("quit", None).to_bytes())
+        self.client_socket.send(message.Msg("quit", None).to_bytes().encode('utf-8'))
         self.is_active = False
         pygame.quit()
         exit()

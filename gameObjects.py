@@ -4,8 +4,12 @@ import json
 
 MAX_BULLET_NUM = 1000
 
-class Tank():
+class Tank(pygame.sprite.Sprite):
     def __init__(self, pos, direct, color, size, speed, health, shoot_cd):
+        super().__init__()
+        self.image = pygame.Surface((size, size))
+        self.image.fill(color)
+        self.rect = self.image.get_rect(center=pos)
         self.pos = pos
         self.direct = direct / np.linalg.norm(direct)
         self.color = color
@@ -40,9 +44,13 @@ class Tank():
             self.move(np.array([0, 1]), delta_time)
         if keys[pygame.K_d]:
             self.move(np.array([1, 0]), delta_time)
+        #检测esc退出,即返回`Quit`
+        if keys[pygame.K_ESCAPE]:
+            return "Quit"
 
         mouse_pos = pygame.mouse.get_pos()
         self.rotate(np.array(mouse_pos) - self.pos)
+        self.rect.center = self.pos
     
     def to_bytes(self):
         return json.dumps(
@@ -59,8 +67,12 @@ class Tank():
         info = json.loads(data)
         return Tank(np.array(info['pos']), np.array(info['direct']), info['color'], info['size'], info['speed'], info['health'], info['shoot_cd'])
     
-class Bullet():
+class Bullet(pygame.sprite.Sprite):
     def __init__(self, pos, direct, color, size, speed, max_duration = 1, timer = 0):
+        super().__init__()
+        self.image = pygame.Surface((size, size))
+        self.image.fill(color)
+        self.rect = self.image.get_rect(center=pos)
         self.pos = np.array(pos)
         self.direct = np.array(direct)
         self.color = color
@@ -80,6 +92,7 @@ class Bullet():
             return False
         self.timer += delta_time * 1000
         self.move(delta_time)
+        self.rect.center = self.pos
     
     def to_bytes(self):
         return json.dumps(
@@ -97,14 +110,16 @@ class Bullet():
         info = json.loads(data)
         return Bullet(np.array(info['pos']), np.array(info['direct']), info['color'], info['size'], info['speed'], info['max_duration'], info['timer'])
     
-class BulletPool():
+class BulletPool(pygame.sprite.Group):
     def __init__(self, max_bullet_num = MAX_BULLET_NUM):
+        super().__init__()
         self.pool = []
         self.max_bullet_num = max_bullet_num    
     
-    def add(self, bullet):
+    def add_bullet(self, bullet):
         if(len(self.pool) < self.max_bullet_num):
             self.pool.append(bullet)
+            self.add(bullet)
      
     def draw(self, screen):
         for bullet in self.pool:
@@ -126,7 +141,7 @@ class BulletPool():
         info = data.split('#')
         for i in info:
             if(i != ""):
-                pool.add(Bullet.from_bytes(i))
+                pool.add_bullet(Bullet.from_bytes(i))
         return pool
 
 
