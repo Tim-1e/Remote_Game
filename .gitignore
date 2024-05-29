@@ -1,0 +1,3 @@
+# 将pycharm下面的.idea文件夹和__pycache__文件夹排除在外
+.idea
+__pycache__
