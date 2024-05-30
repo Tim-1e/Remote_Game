@@ -11,6 +11,9 @@ lock = Lock()
 
 class Client():
     def __init__(self, host_ip, host_port):
+        
+        pygame.display.init()
+        self.screen = pygame.display.set_mode((640, 480))
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.host_ip = host_ip
         self.host_port = host_port
@@ -20,21 +23,32 @@ class Client():
         
         # game info
         self.bullet_pool = BulletPool(MAX_BULLET_NUM)
-        self.tank = Tank(np.array([100.0, 100.0]), np.array([1.0, 0]), (255, 0, 0), 50, 200, 100, 500)
+        self.tank = Tank(np.array([100.0, 100.0]), np.array([1.0, 0]), (255, 0, 255), 50, 100, 100, 1000)
         self.tanks = [self.tank]
-        self.all_sprites = pygame.sprite.Group(self.tanks, self.bullet_pool)
+        self.map = Map()
+        self.all_sprites = pygame.sprite.Group()
         
-    def connect(self):
-        self.client_socket.connect((self.host_ip, self.host_port))
-        self.connect_state = "connected"
-        print("connect success")
+    def connect(self, time_out = 10):
+        timer = time.time()
+        while(time.time() - timer < time_out):
+            try:
+                self.client_socket.connect((self.host_ip, self.host_port))
+                self.connect_state = "connected"
+                print("connect success")
+                return
+            except Exception as e:
+                print(e)
+                time.sleep(0.1)
+        self.connect_state = "fail"
+        print("fail to connect to server")
         
     def register(self):
         self.send(message.Msg("register", None).to_bytes())
         data = message.Msg.from_bytes(self.recv())
-        # example {'type': 'register', 'id': 0, 'color': (255, 0, 0)...}
+        # example {'type': 'register', 'id': 0, 'color': (255, 0, 0),'map': ...}
         self.id = data.data['id']
-        self.tank.color = data.data['color']
+        self.tank.update_color(data.data['color'])
+        self.map = Map.from_bytes(data.data['map'])
         # and other info
         self.connect_state == "registered"  
         
@@ -64,17 +78,17 @@ class Client():
                 msg = server_msg.split('||')
                 for m in msg:
                     if(m != ''):
-                        self.update(m)
+                        self.update_gamestate(m)
         print("end")
 
-    def update(self, server_msg):    
+    def update_gamestate(self, server_msg):    
         data = message.Msg.from_bytes(server_msg)
         type = data.type
         if(type != "game_data"):
             print("unknown message type: " + type)
             return
         # example {'tanks': ..., 'bullet_pool': ...'}
-        # print(data)
+
         # tanks data
         tanks_data = data.data['tanks']
         if(tanks_data != None):
@@ -85,26 +99,29 @@ class Client():
                         continue
                     tank = Tank.from_bytes(tank_info['info'])
                     self.tanks.append(tank)
+                    
         # bullet pool data
         bullet_pool_data = data.data['bullet_pool']
         if(bullet_pool_data != None):
             with lock:
                 self.bullet_pool = BulletPool.from_bytes(bullet_pool_data)
     
-    def draw(self, screen, tanks, bullet_pool):
-        self.all_sprites=pygame.sprite.Group(self.tanks, self.bullet_pool)
+    def draw(self, screen):
+        start_time = pygame.time.get_ticks()
+        self.all_sprites=pygame.sprite.Group(self.bullet_pool, self.map)
         self.all_sprites.draw(screen)
-        # for tank in tanks:
-        #     tank.draw(screen)
+        for tank in self.tanks:
+            tank.draw(screen)
+        end_time = pygame.time.get_ticks()
+        # print("draw time: ", end_time - start_time)
          
     def game_loop(self, screen):
-        loop_start_time = pygame.time.get_ticks()
         
+        loop_start_time = pygame.time.get_ticks()
+
         screen.fill((255, 255, 255))
-        result=self.tank.update(1 / fps)
-        if (result=="Quit"):
-            self.quit()
-            return
+        
+        self.tank.update(1 / fps, self.map)
 
         # with lock:
         #     self.bullet_pool.update(1 / fps)
@@ -120,20 +137,24 @@ class Client():
         self.send(message.Msg("update_tank", self.tank.to_bytes()).to_bytes() + '||')
         
         # draw
-        self.draw(screen, self.tanks, self.bullet_pool)
+        self.draw(screen)
         
         loop_end_time = pygame.time.get_ticks() 
                
         pygame.display.update()
-        pygame.time.delay(int(1000 / fps - (loop_end_time - loop_start_time)))
+        sleep_time = int(1000 / fps - (loop_end_time - loop_start_time))
+        pygame.time.delay(max(0, sleep_time))
         
     def start(self):
-        screen = pygame.display.set_mode((640, 480))
 
-        thread_connect = threading.Thread(target=self.connect)
+        thread_connect = threading.Thread(target=self.connect, args=(10, ))
         thread_connect.start()
+        
         while(self.connect_state != "connected"):
             time.sleep(0.1)
+            if(self.connect_state == "fail"):
+                quit()
+            
         self.register()
         print("register success")
         
@@ -144,11 +165,15 @@ class Client():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.quit()
-            self.game_loop(screen)                
+            self.game_loop(self.screen)                
                
     def quit(self):
-        self.client_socket.send(message.Msg("quit", None).to_bytes().encode('utf-8'))
+        try:
+            self.send(message.Msg("quit", None).to_bytes())
+        except Exception as e:
+            print(e)
         self.is_active = False
+        self.client_socket.close()
         pygame.quit()
         exit()
 

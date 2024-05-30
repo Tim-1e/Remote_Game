@@ -1,4 +1,5 @@
 import threading
+import time
 
 from client import Client
 from server import Server
@@ -16,5 +17,9 @@ def Client_begin():
 thread_server = threading.Thread(target=Server_begin, args=(''))
 thread_server.start()
 
+time.sleep(1)
+
+
 thread_client = threading.Thread(target=Client_begin, args=(''))
 thread_client.start()
+

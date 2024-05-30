@@ -7,8 +7,12 @@ from test_all import message
 
 MAX_CLIENT_NUM = 4
 fps = 60
+physics_fps = 120
 
 lock = Lock()
+
+player_colors = [(83,134,139), (69,139,116), (72,61,139), (139,129,76)]
+
 
 class Server():
     def __init__(self, host_ip, host_port):
@@ -17,14 +21,16 @@ class Server():
         self.host_port = host_port
         self.is_active = True
         self.temp_id = 5000 # 5000-5003
-        self.client_id = dict()
-        self.tanks = dict()
+        self.client_id = dict() # client_socket -> id
+        self.tanks = dict() # id -> tank
         self.bullet_pool = BulletPool(MAX_BULLET_NUM)
+        self.map = Map()
 
     def listen(self):
         self.server_socket.bind((self.host_ip, self.host_port))
         self.server_socket.listen(MAX_CLIENT_NUM)
         print("Server at ", self.host_ip, ":", self.host_port, " is listening...")
+        
     def accept(self):
         while self.is_active:
             client_socket, client_address = self.server_socket.accept()
@@ -40,8 +46,8 @@ class Server():
             if(type == 'register'):
                 # register
                 # print("register, client: ", client_socket, " id: ", self.temp_id)
-                self.client_id[client_socket] = self.temp_id
-                msg = message.Msg('register', {'id': self.temp_id, 'color': (255, 255, 0)})
+                self.client_id[client_socket] = self.temp_id # 5000 - 5003
+                msg = message.Msg('register', {'id': self.temp_id, 'color': player_colors[self.temp_id - 5000], 'map': self.map.to_bytes()})
                 self.send(client_socket, msg.to_bytes())
                 self.temp_id += 1
             else:
@@ -65,7 +71,7 @@ class Server():
             client_socket.setblocking(1)
             return msg.decode('utf-8')
         except Exception as e:
-            # print("RecvError in Server: ", e)
+            print("RecvError in Server: ", e)
             return None
 
     def send(self, client_socket, msg):
@@ -100,7 +106,8 @@ class Server():
 
             update_end_time = time.time()
 
-            time.sleep(1 / fps - (update_end_time - update_start_time))
+            sleep_time = 1 / fps - (update_end_time - update_start_time)
+            time.sleep(max(0, sleep_time))
         print("Client ", ip_name, " recv close")
 
     def handle_client(self, client_socket):
@@ -132,20 +139,25 @@ class Server():
             self.tanks.pop(id)
 
         print("Client ", client_socket.getpeername(), " disconnected")
-        self.send(client_socket,message.Msg("quit recv", None).to_bytes())
         client_socket.close()
-
+    
+    def game_loop(self):
+        start_time = time.time()
+        with lock:
+            self.bullet_pool.update(1 / physics_fps, self.map, self.tanks.values())             
+                    
+        end_time = time.time()
+        sleep_time = 1 / physics_fps - (end_time - start_time)
+        time.sleep(max(0, sleep_time))
+    
     def start(self):
         thread = threading.Thread(target=self.accept)
         thread.start()
 
         # game loop
         while True:
-            start_time = time.time()
-            with lock:
-                self.bullet_pool.update(1 / fps)
-            end_time = time.time()
-            time.sleep(1 / fps - (end_time - start_time))
+            self.game_loop()
+
 
     def quit(self):
         self.is_active = False
